@@ -30,7 +30,7 @@ class DataExtractor:
         raw_data_path = os.path.join(os.getcwd(), "data/raw")
         for json_file in glob.glob(os.path.join(raw_data_path, "*.json")):
             filename = os.path.basename(json_file)
-            file_start_time = time.time()
+            file_start_time = time.perf_counter()
             self.logger.info(f"Started processing for file: {filename}")
             
             try:
@@ -71,7 +71,7 @@ class DataExtractor:
                         self.db.bulk_insert("staging.streaming_history", columns, records)
             
                 # Log success
-                processing_time = time.time() - file_start_time
+                processing_time = time.perf_counter() - file_start_time
                 record_count = len(records)
                 self.logger.info(f"Successfully processed {filename}: {record_count} records in {processing_time:.2f} seconds")
             
@@ -140,7 +140,7 @@ class DataExtractor:
         self.logger.info(f"All batches processed. Total time: {total_time:.2f} seconds. Total {item_type}s: {total_items_processed} with {total_failed_items} {item_type}s failed")
 
 
-    def _process_spotify_batch(self, batch: list, batch_number:int, api_call:Callable, item_type:str) -> tuple[bool, float, int, int]:
+    def _process_spotify_batch(self, batch: list, batch_number:int, api_call:Callable, item_type:str, retry_limit:int = 2) -> tuple[bool, float, int, int]:
         """
         Process a single batch of tracks or episodes.
         Args:
@@ -148,14 +148,16 @@ class DataExtractor:
             batch_number (int): batch number for logging
             api_call (Callable): Spotify client function to fetch data (e.g. get_tracks())
             item_type (str): `track` or `episode`
+            retry_limit (int): Number of retries allowed before failing. 2 by default
         Returns:
-            (bool, float, int): (success flag, batch processing time, number of items processed)
+            tuple[bool, float, int, int]: (success flag, batch processing time, number of items processed, number of failed items)
+
         """
         retry_counter = 0
         failed_items_counter = 0
-        batch_time_start = time.time()  
+        batch_time_start = time.perf_counter()  
         
-        while retry_counter < 2:
+        while retry_counter < retry_limit:
             try:
                 # call Spotify API to get data
                 api_response = api_call(batch)
@@ -179,18 +181,18 @@ class DataExtractor:
                 valid_data = list(fetched_data.values())
 
                 # insert raw data into staging
-                self.db.bulk_insert(f"staging.spotify_{item_type}s_data", ["raw_data"], valid_data, wrap_json=True)
+                self.db.bulk_insert(f"staging.spotify_{item_type}s_data", [f"spotify_{item_type}_uri", "raw_data"], valid_data, wrap_json=True)
                 
                 # track and log the time
-                batch_total_time = time.time() - batch_time_start
-                self.logger.info(f"Processed batch {batch_number} with {items_count} in {batch_total_time:.2f} seconds on attempt {retry_counter+1}")
+                batch_total_time = time.perf_counter() - batch_time_start
+                self.logger.info(f"Processed batch {batch_number} with {items_count} items in {batch_total_time:.2f} seconds on attempt {retry_counter+1}")
 
                 return True, batch_total_time, items_count, failed_items_counter
             
             except SpotifyException as e:
                 # catch a Spotify error: either a rate limit or something wrong with credentials 
 
-                batch_total_time = time.time() - batch_time_start
+                batch_total_time = time.perf_counter() - batch_time_start
 
                 if e.http_status == 429:  # rate limit error
                     wait_time = int(e.headers.get("Retry-After", 60))
@@ -199,12 +201,21 @@ class DataExtractor:
                     
                     retry_counter += 1
 
+                elif e.http_status == 400: # invalid uri
+                    self.logger.error(f"Batch {batch_number} failed with HTTP 400. Retrying items individually.")
+                    items_count, failed_items_counter = self._retry_batch(batch, item_type)
+
+                    batch_total_time = time.perf_counter() - batch_time_start
+                    self.logger.info(f"Processed batch {batch_number} with {items_count} successfully with {failed_items_counter} invalid URIs in {batch_total_time:.2f} seconds on attempt {retry_counter+1}")
+
+                    return True, items_count, failed_items_counter
+
                 else:
                     self.logger.error(f"Spotify error in batch {batch_number}: {e}")
                     raise
             
             except Exception as e:
-                batch_total_time = time.time() - batch_time_start
+                batch_total_time = time.perf_counter() - batch_time_start
                 self.logger.error(f"Unexpected error in batch {batch_number} after {batch_total_time:.2f} seconds: {e}")
                 raise
         
@@ -214,22 +225,80 @@ class DataExtractor:
 
         return False, batch_total_time, 0, failed_items_counter
 
-    def _get_new_items(self, entity_type:str):
+    def _get_new_items(self, entity_type: str):
         """
-        Returns a list of only the new unique tracks from the staged data
-        
+        Returns a list of only the new unique items from the staged data, 
+        excluding those already in the core and previous staging history.
+
         Args:
             entity_type (str): `track` or `episode`
+        Returns:
+            list: new items to process
         """
-        staged_items = self.db.get_distinct_uri(uri_type = entity_type, table="staging.streaming_history")
-        existing_items = self.db.get_distinct_uri(uri_type=entity_type, table=f"core.dim_{entity_type}")
+        # URIs already staged in history
+        staged_history_items = self.db.get_distinct_uri(uri_type=entity_type, table="staging.streaming_history")
 
-        new_items = list(set(staged_items) - set(existing_items))
+        # URIs already in the core dimension table
+        existing_core_items = self.db.get_distinct_uri(uri_type=entity_type, table=f"core.dim_{entity_type}")
+
+        # URIs from the current staging load
+        staged_items = self.db.get_distinct_uri(uri_type=entity_type, table=f"staging.spotify_{entity_type}s_data")
+
+        # Exclude already processed and previously staged URIs
+        new_items = list(set(staged_history_items) - set(existing_core_items) - set(staged_items))
 
         return new_items
 
+
     def _log_error_batch(self, batch:list, item_type:str):
+        """
+        Logs the failed batch of items into the database.
+
+        Args:
+            batch (list): List of items that failed.
+            item_type (str): Type of the item, can be 'track' or 'episode'.
+        """
+        
         self.logger.info("Inserting failed batch into etl_internal.failed_uris")
         error_batch = [(uri, item_type, "Failed batch") for uri in batch]
         self.db.bulk_insert("etl_internal.failed_uris", ["uri", "entity_type", "error_reason"], error_batch)
+
+    
+    def _retry_batch(self, batch:list, item_type:str):
+        """
+        Retries the failed batch of items.
+
+        Args:
+            batch (list): List of items to retry.
+            item_type (str): Type of the item, can be 'track' or 'episode'.
+        Returns:
+            tuple: A tuple containing the number of valid and invalid items.
+        """
+        invalid_uris = []
+        valid_data = []
+        api_call = self.spotify_client.sp.track if item_type == "track" else self.spotify_client.sp.episode
+
+        for item in batch:
+            try:
+                item_data = api_call(item)
+                # append item uri and the data
+                valid_data.append((item, item_data))
+
+            except SpotifyException as single_e:
+                if single_e.http_status == 400:
+                    self.logger.warning(f"Invalid URI detected: {item}")
+                    invalid_uris.append((item, item_type, "Invalid URI"))
+                else:
+                    raise  # If another error occurs, let it bubble up
+            
+        if invalid_uris:
+            self.logger.info(f"Logging {len(invalid_uris)} invalid URIs to etl_internal.failed_uris")
+            self.db.bulk_insert("etl_internal.failed_uris", ["uri", "entity_type", "error_reason"], invalid_uris)
+
+        # Insert valid URIs
+        self.db.bulk_insert(f"staging.spotify_{item_type}s_data", [f"spotify_{item_type}_uri", "raw_data"], valid_data, wrap_json=True)
+
+        return len(valid_data), len(invalid_uris)
+
+
     
