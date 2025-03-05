@@ -221,7 +221,7 @@ class DataExtractor:
         self.logger.error(f"Exceeded retries for batch {batch_number}")
         self._log_error_batch(batch, item_type)
 
-        return False, batch_total_time, 0, failed_items_counter
+        return False, batch_total_time, 0, len(batch)
 
     def _get_new_items(self, entity_type: str):
         """
