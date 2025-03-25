@@ -3,6 +3,7 @@ from psycopg2.extras import execute_values, Json
 from config.config import settings
 from logging import Logger
 from datetime import datetime, timezone
+from contextlib import contextmanager
 
 class DatabaseManager:
     def __init__(self, logger:Logger):
@@ -68,6 +69,23 @@ class DatabaseManager:
             self.cursor.close()
         if self.connection:
             self.connection.close()
+
+    @contextmanager
+    def transaction(self):
+        cursor = None
+        try:
+            # Create a regular cursor (not a named cursor)
+            cursor = self.connection.cursor()
+            cursor.execute("BEGIN;")
+            yield cursor
+            self.connection.commit()
+        except Exception as e:
+            self.connection.rollback()
+            self.logger.error(f"Transaction error: {e}")
+            raise
+        finally:
+            if cursor:
+                cursor.close()
 
     def get_distinct_uri(self, uri_type:str, table:str):
         """
