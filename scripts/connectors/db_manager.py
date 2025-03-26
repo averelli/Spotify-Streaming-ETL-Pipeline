@@ -21,7 +21,16 @@ class DatabaseManager:
             self.logger.error(f"Error connecting to database: {e.__str__()}")
 
     def execute_query(self, query, params=None):
-        """Execute a single query."""
+        """
+        Execute a single query.
+
+        Args:
+            query (str): SQL qeury to execute
+            params (tuple): params to insert into the query, None by default
+
+        Returns:
+            list: result of SELECT queries
+        """
         try:
             if params:
                 self.cursor.execute(query, params)
@@ -74,7 +83,6 @@ class DatabaseManager:
     def transaction(self):
         cursor = None
         try:
-            # Create a regular cursor (not a named cursor)
             cursor = self.connection.cursor()
             cursor.execute("BEGIN;")
             yield cursor
