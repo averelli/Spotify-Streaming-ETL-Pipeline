@@ -12,6 +12,12 @@ class DatabaseManager:
         self.logger = logger
         self.connect()
 
+    def __enter__(self): # for a context manager
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+
     def connect(self):
         """Establish a database connection using DATABASE_URL."""
         try:
@@ -107,7 +113,7 @@ class DatabaseManager:
             list: A list of distinct URIs
         """
         if uri_type not in ["track", "episode", "artist", "podcast"]:
-            raise ValueError("Invalid uri_type. Must be: track, episode, artist, or podcast")
+            raise ValueError(f"Invalid uri_type. Must be: track, episode, artist, or podcast. Instead {uri_type} passed")
         
         query = f"SELECT DISTINCT spotify_{uri_type}_uri FROM {table};"
         result = self.execute_query(query)
@@ -118,7 +124,7 @@ class DatabaseManager:
     def get_staged_uri_from_json(self, uri_type:str):
         
         if uri_type == "artist":
-            query = "SELECT DISTINCT artists ->> 'uri' FROM staging.spotify_tracks_data t, jsonb_array_elements(raw_data -> 'album' -> 'artists') as artists;"
+            query = "SELECT DISTINCT artists ->> 'uri' FROM staging.spotify_tracks_data t, jsonb_array_elements(raw_data -> 'artists') as artists;"
         elif uri_type == "podcast":
             query = "select distinct raw_data -> 'show' ->> 'uri' from staging.spotify_episodes_data t;"
 
@@ -129,7 +135,6 @@ class DatabaseManager:
         self.logger.info(f"Fetched {len(result)} distinct {uri_type} URIs from staged items")
 
         return [row[0] for row in result]
-    
     
     def get_max_history_ts(self):
         """Returns the latest date from the core and staged streaming history"""
