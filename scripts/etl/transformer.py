@@ -10,7 +10,7 @@ class DataTransformer:
         
         self.BATCH_SIZE = 50
 
-    def _clean_track(self, raw_track:dict):
+    def _clean_track(self, raw_track:dict) -> (tuple[str, str, str, str, str, str, str, str, int, int] | None):
         """
         Transforms a raw track JSON into a clean track tuple.
         
@@ -51,7 +51,7 @@ class DataTransformer:
             self.logger.error(f"Error cleaning track data for track {raw_track.get('uri')}: {e}")
             return None
     
-    def _clean_artist(self, raw_artist:dict):
+    def _clean_artist(self, raw_artist:dict) -> (tuple[str, str, str] | None):
         """
         Transforms a raw track JSON into a clean artist tuple.
         
@@ -74,7 +74,7 @@ class DataTransformer:
             self.logger.error(f"Error cleaning artist data for artist {raw_artist.get('uri')}: {e}")
             return None
         
-    def _clean_podcast(self, raw_podcast:dict):
+    def _clean_podcast(self, raw_podcast:dict) -> (tuple[str, str, str, str] | None):
         """
         Transforms a raw podcast JSON into a clean podcast tuple.
         
@@ -99,7 +99,7 @@ class DataTransformer:
             self.logger.error(f"Error cleaning podcast data for artist {raw_podcast.get('uri')}: {e}")
             return None
         
-    def _clean_episode(self, raw_episode:dict):
+    def _clean_episode(self, raw_episode:dict) -> (tuple[str, int, int, str, str, str] | None):
         """
         Transforms a raw episode JSON into a clean episode tuple.
         
@@ -129,7 +129,7 @@ class DataTransformer:
         except Exception as e:
             return None
 
-    def _normalise_date(self, release_date:str, precision:str, item_uri:str):
+    def _normalise_date(self, release_date:str, precision:str, item_uri:str) -> str:
         """
         Normalizes a release date based on its precision.
         
@@ -205,7 +205,7 @@ class DataTransformer:
         staged_items = self.db.execute_query(f"SELECT record_id, raw_data FROM staging.spotify_{item_type}_data WHERE is_processed = FALSE;")
         if not staged_items:
             self.logger.warning("No unprocessed staged items found")
-            total_time = time.perf_counter() - time_start
+            total_time = round(time.perf_counter() - time_start, 2)
             return total_time
 
         for i in range(0, len(staged_items), self.BATCH_SIZE):
@@ -244,7 +244,7 @@ class DataTransformer:
                     self.logger.error(f"Error while inserting and updating batch number {batch_number}: {e}")
                     raise # raise so the transaction rolls back
         
-        total_time = time.perf_counter() - time_start
+        total_time = round(time.perf_counter() - time_start, 2)
         self.logger.info(f"All batches processed successfully in {total_time} seconds. Inserted {total_items_count} {item_type}")
         return total_time
 
@@ -339,19 +339,70 @@ class DataTransformer:
             self.logger.error(f"Invalid item type passed. Expected 'track' or 'podcast', got: {item_type}")
             raise ValueError(f"Invalid item type passed. Expected 'track' or 'podcast', got: {item_type}")
         
-
         try:
             self.db.execute_query(query)
 
-            total_time = time.perf_counter() - time_start
+            total_time = round(time.perf_counter() - time_start, 2)
             row_count = self.db.cursor.rowcount
             self.logger.info(f"Inserted {row_count} rows into fact_tracks_history in {total_time} seconds")
 
             return total_time
         
         except Exception as e:
-            self.logger.error(f"Error while inserting data into fact_tracks_history: {e}")
+            self.logger.error(f"Error while inserting data into fact_{item_type}s_history: {e}")
             raise
+
+    def populate_dim_reason(self) -> float:
+        """
+        Repopulates dim_reason in case there are new reasons added
+        Returns:
+            int: total time.
+        """
+        start_time = time.perf_counter()
+        self.logger.info("Started repopulating dim_reason")
+
+        try:
+            query = """
+            INSERT INTO core.dim_reason (reason_type, reason_group)
+            SELECT DISTINCT reason_start AS reason_type, 'start' AS reason_group FROM staging.streaming_history
+            UNION ALL
+            SELECT DISTINCT reason_end, 'end' AS reason_group FROM staging.streaming_history
+            ON CONFLICT DO NOTHING;
+            """
+            self.db.execute_query(query)
+
+            total_time = round(time.perf_counter() - start_time, 2)
+            self.logger.info(f"Finished repopulating dim_reason, took {total_time} seconds")
+            return total_time
+
+        except Exception as e:
+            self.logger.error(f"Error while repopulating dim_reason: {e}")
+            raise
+
+    def cleanup_staging(self):
+        """
+        Cleans up staging layer. Streaming history is truncated, in other tables rows are deleted if 'is_processed' is marked as TRUE.
+        Returns:
+            float: total time to finish the process.
+        """
+        start_time = time.perf_counter()
+        self.logger.info("Started staging cleaning up process.")
+
+        with self.db.transaction() as tx_cursor:
+            try:
+                tx_cursor.execute("TRUNCATE TABLE staging.streaming_history;")
+                tx_cursor.execute("DELETE FROM staging.spotify_tracks_data WHERE is_processed = TRUE;")
+                tx_cursor.execute("DELETE FROM staging.spotify_episodes_data WHERE is_processed = TRUE;")
+                tx_cursor.execute("DELETE FROM staging.spotify_artists_data WHERE is_processed = TRUE;")
+                tx_cursor.execute("DELETE FROM staging.spotify_podcasts_data WHERE is_processed = TRUE;")
+                
+                self.logger.info("Staging cleanup completed successfully.")
+                total_time = round(time.perf_counter() - start_time, 2)
+
+                return total_time
+            except Exception as e:
+                self.logger.error(f"Error during staging cleanup: {e}", exc_info=True)
+                raise
 
     def run(self) -> int:
         """
@@ -362,22 +413,33 @@ class DataTransformer:
         for "track" and "podcast" data. It logs processing times and metrics for each stage.
         
         Returns:
-            int: Total time for the entire process.
+            float: Total time for the entire process.
         """
         self.logger.info("Started running data transformation and loading")
         
         dim_item_types = ["tracks", "artists", "podcasts", "episodes"]
         fact_item_types = ["track", "podcast"]
 
-        total_time = 0
+        total_time = 0.0
 
+        # populate dims
         for item_type in dim_item_types:
             process_time = self.process_staged_batches(item_type)
             total_time += process_time
 
+        # populate dim_reason
+        process_time = self.populate_dim_reason()
+        total_time += process_time
+
+        # populate facts
         for item_type in fact_item_types:
             process_time = self.insert_core_facts(item_type)
             total_time += process_time
+
+        # clean up staging
+        cleanup_time = self.cleanup_staging()
+
+        total_time = round(total_time + cleanup_time, 2)
 
         self.logger.info(f"Finihsed running data transformation and loading in {total_time} seconds")
 
