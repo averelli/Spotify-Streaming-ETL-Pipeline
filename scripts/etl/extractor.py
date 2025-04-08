@@ -16,6 +16,9 @@ class DataExtractor:
         self.spotify_client = SpotifyClient(logger)
 
     def extract_streaming_history(self):
+        """
+        Extracts streaming data from raw json files provided by Spotify and inserts them into the staging layer of db.
+        """
         # metrics
         total_files = 0
         total_records = 0
@@ -90,7 +93,6 @@ class DataExtractor:
         else:
             self.logger.info(f"Extraction complete. Processed {total_files} files, {total_records} total records. Total time: {total_time:.2f} seconds")
 
-
     def stage_spotify_items(self, item_type:str):
         """
         Stage unique Spotify entities from streaming history
@@ -137,7 +139,6 @@ class DataExtractor:
                 self.logger.error(f"Batch {batch_number} failed after maximum retries. Skipping these URIs.")
 
         self.logger.info(f"All batches processed. Total time: {total_time:.2f} seconds. Total {item_type}s: {total_items_processed} with {total_failed_items} {item_type}s failed")
-
 
     def _process_spotify_batch(self, batch: list, batch_number:int, api_call:Callable, item_type:str, retry_limit:int = 2) -> tuple[bool, float, int, int]:
         """
@@ -250,7 +251,6 @@ class DataExtractor:
 
         return new_items
 
-
     def _log_error_batch(self, batch:list, item_type:str):
         """
         Logs the failed batch of items into the database.
@@ -263,8 +263,7 @@ class DataExtractor:
         self.logger.warning("Inserting failed batch into etl_internal.failed_uris")
         error_batch = [(uri, item_type, "Failed batch") for uri in batch]
         self.db.bulk_insert("etl_internal.failed_uris", ["uri", "entity_type", "error_reason"], error_batch)
-
-    
+  
     def _retry_batch(self, batch:list, item_type:str, api_call:Callable):
         """
         Retries the failed batch of items.
@@ -300,3 +299,26 @@ class DataExtractor:
         self.db.bulk_insert(f"staging.spotify_{item_type}s_data", [f"spotify_{item_type}_uri", "raw_data"], valid_data, wrap_json=True)
 
         return len(valid_data), len(invalid_uris)
+
+    def run(self):
+        """
+        Orchestrates the full data extraction process. 
+        Returns:
+            int: Total time for the entire process.
+        """
+
+        start_time = time.perf_counter()
+        self.logger.info("Started running data extraction.")
+
+        # extract data from jsons
+        self.extract_streaming_history()
+        
+        # fetch data from Spotify API
+        item_types = ["track", "artist", "podcast", "episode"]
+        for item_type in item_types:
+            self.stage_spotify_items(item_type)
+
+        total_time = round(time.perf_counter() - start_time, 2)
+        self.logger.info(f"Data extraction finished, took {total_time} seconds")
+
+        return total_time
