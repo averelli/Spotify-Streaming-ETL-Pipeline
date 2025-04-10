@@ -1,6 +1,7 @@
 import logging
 import logging.handlers
 import json
+import os
 
 def setup_logging():
     logger = logging.getLogger("etl_pipeline")
@@ -21,6 +22,9 @@ def setup_logging():
     console_handler.setLevel(logging.DEBUG)  
     console_handler.setFormatter(formatter)
     logger.addHandler(console_handler)
+
+    # Ensure 'logs/' directory exists
+    os.makedirs("logs", exist_ok=True)
 
     # Log to file with rotation
     file_handler = logging.handlers.RotatingFileHandler(
