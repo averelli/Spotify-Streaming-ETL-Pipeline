@@ -273,7 +273,7 @@ class DataTransformer:
             INSERT INTO core.fact_tracks_history (
             ts_msk, date_fk, time_fk, ms_played, sec_played, 
             track_fk, artist_fk, reason_start_fk, reason_end_fk, 
-            shuffle, session_length_category, offline, offline_timestamp
+            shuffle, percent_played, offline, offline_timestamp
             )
             SELECT
                 s.ts AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow' AS ts_msk,
@@ -286,11 +286,7 @@ class DataTransformer:
                 rs.reason_id,
                 re.reason_id,
                 s.shuffle,
-                CASE
-                    WHEN s.ms_played < 10000 THEN 'skipped'
-                    WHEN ABS(s.ms_played - dt.duration_ms) <= 15000 THEN 'full song'
-                    ELSE 'partial'
-                END AS session_length_category,
+                round(s.ms_played::numeric / NULLIF(dt.duration_ms, 0) * 100, 1),
                 s.offline,
                 s.offline_timestamp
             FROM staging.streaming_history s
