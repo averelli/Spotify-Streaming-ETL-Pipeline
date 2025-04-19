@@ -44,7 +44,7 @@ A custom-built data pipeline that extracts personal Spotify streaming history, e
 - Fetches metadata from the Spotify API in batches (handles rate limits and errors)
 - Stores raw data in a staging schema (inside jsonb columns)
 - Transforms and loads clean, normalized records into a star schema
-- Populates fact tables with calculated fields (e.g. session length category)
+- Populates fact tables with calculated fields (e.g. percent_played)
 - Maintains re-runnable logic with deduplication and delta loads
 - Tracks failed API responses for manual review
 - Truncates staging layer after the process is done

@@ -34,7 +34,8 @@ create table if not exists core.dim_reason
     reason_id    serial,
     reason_type  varchar,
     reason_group varchar(5),
-    primary key (reason_id)
+    primary key (reason_id),
+    constraint unique_reason_pair unique (reason_type, reason_group)
 );
 
 create table if not exists core.dim_date
@@ -118,7 +119,7 @@ create table if not exists core.fact_tracks_history
     reason_start_fk         integer,
     reason_end_fk           integer,
     shuffle                 boolean,
-    session_length_category varchar,
+    percent_played          float,
     offline                 boolean,
     offline_timestamp       bigint,
     primary key (stream_id),
