@@ -400,14 +400,15 @@ class DataTransformer:
                 self.logger.error(f"Error during staging cleanup: {e}", exc_info=True)
                 raise
 
-    def run(self) -> int:
+    def run(self, debug_disable_cleanup:bool=None) -> int:
         """
         Orchestrates the full data transformation and loading process.
         
         This method sequentially processes each dimension type ("tracks", "artists", "podcasts", "episodes")
         from the staging tables into the corresponding core dimension tables, and then loads the fact tables
         for "track" and "podcast" data. It logs processing times and metrics for each stage.
-        
+        Args:
+            debug_disable_cleanup (bool): If True, skips the cleanup of staging tables for debugging purposes.
         Returns:
             float: Total time for the entire process.
         """
@@ -433,9 +434,11 @@ class DataTransformer:
             total_time += process_time
 
         # clean up staging
-        cleanup_time = self.cleanup_staging()
-
-        total_time = round(total_time + cleanup_time, 2)
+        if not debug_disable_cleanup:
+            cleanup_time = self.cleanup_staging()
+            total_time = round(total_time + cleanup_time, 2)
+        else:
+            self.logger.warning("DEBUG MODE: Skipping staging cleanup. Data remains in staging tables")
 
         self.logger.info(f"Finihsed running data transformation and loading in {total_time} seconds")
 
