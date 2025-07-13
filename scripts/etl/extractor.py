@@ -115,7 +115,7 @@ class DataExtractor:
             batch_number = i // batch_size + 1
             batch = new_items[i:i+batch_size]
 
-            self.logger.info(f"Started processing batch number: {batch_number}")
+            self.logger.info(f"Started processing batch number: {batch_number} with type: {item_type}")
 
             # API call function for each type
             api_calls = {
@@ -138,7 +138,7 @@ class DataExtractor:
             if not success:
                 self.logger.error(f"Batch {batch_number} failed after maximum retries. Skipping these URIs.")
 
-        self.logger.info(f"All batches processed. Total time: {total_time:.2f} seconds. Total {item_type}s: {total_items_processed} with {total_failed_items} {item_type}s failed")
+        self.logger.info(f"All {item_type} batches processed. Total time: {total_time:.2f} seconds. Total {item_type}s: {total_items_processed} with {total_failed_items} {item_type}s failed")
 
     def _process_spotify_batch(self, batch: list, batch_number:int, api_call:Callable, item_type:str, retry_limit:int = 2) -> tuple[bool, float, int, int]:
         """
@@ -230,7 +230,7 @@ class DataExtractor:
         excluding those already in the core and previous staging history.
 
         Args:
-            entity_type (str): `track` or `episode`
+            entity_type (str): `track`, `episode`, `artist`, `podcast`
         Returns:
             list: new items to process
         """
@@ -314,7 +314,7 @@ class DataExtractor:
         self.extract_streaming_history()
         
         # fetch data from Spotify API
-        item_types = ["track", "artist", "podcast", "episode"]
+        item_types = ["track", "artist", "episode", "podcast"] # ORDER IS IMPORTANT HERE: tracks before artists, episodes before podcasts
         for item_type in item_types:
             self.stage_spotify_items(item_type)
 
