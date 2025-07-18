@@ -26,7 +26,7 @@ class DatabaseManager:
         except Exception as e:
             self.logger.error(f"Error connecting to database: {e.__str__()}")
 
-    def execute_query(self, query, params=None):
+    def execute_query(self, query, params=None, manual_fetch:bool=False):
         """
         Execute a single query.
 
@@ -44,7 +44,7 @@ class DatabaseManager:
                 self.cursor.execute(query)
             self.connection.commit()
 
-            if query.strip().upper().startswith("SELECT"):
+            if query.strip().upper().startswith("SELECT") or manual_fetch:
                 return self.cursor.fetchall()
             
         except Exception as e:
