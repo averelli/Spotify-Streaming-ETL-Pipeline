@@ -14,6 +14,21 @@ create table if not exists dm.parent_tracks
     foreign key (child_id) references core.dim_track
 );
 
+-- monthly aggregations
+create or replace view dm.monthly_agg as
+select
+    year,
+    month_num,
+    round(sum(sec_played) / 3600.0, 1) hours_listened,
+    count(stream_id) total_streams_sessions,
+    count(case when sec_played > 10 then stream_id end) total_valid_streams,
+    count(distinct track_fk) distinct_tracks,
+    count(distinct artist_fk) distinct_artists
+from core.fact_tracks_history fh
+    join core.dim_date dd on fh.date_fk = dd.date_id
+group by year, month_num
+order by year desc, month_num desc;
+
 -- albums function
 create or replace function dm.top_albums(filter_year int default null, filter_month int default null, return_limit int default 100)
 returns table(album varchar, artist varchar, hours_played numeric, times_played int, full_sum_streams int, full_real_streams int)
