@@ -2,6 +2,8 @@
 
 A custom-built data pipeline that extracts personal Spotify streaming history, enriches it via Spotify's API, transforms the data, and loads it into a star-schema PostgreSQL data warehouse. This project supports both music and podcast analytics.
 
+---
+
 # Tech Stack
 - Python 3.12
 - PostgreSQL
@@ -9,6 +11,13 @@ A custom-built data pipeline that extracts personal Spotify streaming history, e
 - Psycopg2
 - SQL (DDL, DML, time zone conversions, date normalization)
 - Pytest
+
+---
+
+# Apache Airflow Orchestration
+This project uses pure python for the main logic and orchestration, but I also made an Airflow version of the same ETL pipeline [here](https://github.com/averelli/Spotify-ETL-Airflow-Version)
+
+---
 
 # Project Structure
 
@@ -38,6 +47,8 @@ A custom-built data pipeline that extracts personal Spotify streaming history, e
 └── requirements.txt
 ```
 
+---
+
 # Features
 - Extracts raw streaming data from Spotify's personal export files and inserts it into staging
 - Identifies new unique tracks, episodes, artists, and podcasts
@@ -49,6 +60,8 @@ A custom-built data pipeline that extracts personal Spotify streaming history, e
 - Tracks failed API responses for manual review
 - Truncates staging layer after the process is done
 - Every function and exception is logged to a local rotating log file
+
+---
 
 # Database Schemas
 ## Staging Layer
@@ -78,7 +91,7 @@ Core layer is designed as a star schema, with the following tables:
 - `dim_reason`: stores reasons for starting/ending a streaming session
 ### Exclusive dimensions for `fact_tracks_history`:
 - `dim_artist`: stores data about each artists
-- `dim_track`: stores data about each track
+- `dim_track`: stores data about each track. (Note: column `parent_track_id` has been removed)
 ### Exclusive dimensions for `fact_podcasts_history`:
 - `dim_podcast`: stores data about each podcast
 - `dim_episode`: stores data about each episode
@@ -86,9 +99,53 @@ Core layer is designed as a star schema, with the following tables:
 ## Etl Internal Layer
 ![Core Schema](docs/images/etl_internal.png)
 
-This layer has two tables:
+This layer has the following table:
 - `failed_uris`: stores data about spotify URIs that returned nulls from the API
-- `parent_tracks`: this table acts as a lookup table to populate parent_track_id column inside the dim_track (not yet implemented). So that during analysis, for example, a live/delux/extended track could be easily assosiated with the original track.
+
+## Data Mart Layer (Work in progress)
+To make the dashboard, I’ve started building out a data mart layer ([dm schema](docs/sql/dm_ddl.sql)) on top of the core warehouse tables. This layer provides pre-aggregated views and convenience functions for analytics and Wrapped-style reporting.
+
+### Current Components
+
+- `dm.parent_tracks`: helper mapping table to unify “child” tracks with their parent albums/tracks (useful for remasters, alternate versions, etc.).
+
+Aggregated Views:
+
+- `dm.yearly_agg`: yearly listening summaries (hours, sessions, distinct tracks/artists)
+- `dm.monthly_agg`: monthly breakdowns with the same metrics
+- `dm.all_time_agg`: overall listening stats since the start of data collection
+
+Utility Functions:
+Reusable functions returning ranked tables of top content, with optional filters for year/month and configurable limits:
+
+- `dm.top_artists(year, month, limit)`
+- `dm.top_albums(year, month, limit)`
+- `dm.top_tracks(year, month, limit)`
+
+Each function outputs hours listened, raw play counts, estimated full streams, and a cover art URL for visualization in the dashboard.
+
+---
+
+## Dashboard (Work in progress)
+
+I am currently building a Streamlit + Plotly dashboard on top of the data mart layer.
+The goal is to create a Wrapped-style interface that lets me explore my listening history interactively, with year/month filters, drill-downs, and rich visualizations.
+
+### Current Features
+- **Global & filtered stats:** hours listened, total streams, estimated full streams, and distinct tracks/artists.
+- **Interactive charts:**
+  - Year-over-year bar chart of hours listened
+  - Monthly breakdown with clickable bars → drill down into a specific month
+- **Top charts sections:**
+artists, albums, and tracks with cover art, listening hours, and play counts.
+
+### Work in Progress
+- UI/UX polish
+- More stats and visualisations
+- More filters
+- Artist/track pages with stats
+
+---
 
 # Challenges faced
 - Ensuring code reusability across multiple item types (tracks, artists, podcasts, and episodes).
