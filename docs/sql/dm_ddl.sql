@@ -47,6 +47,18 @@ from core.fact_tracks_history fh
 group by year, month_num
 order by year desc, month_num desc;
 
+-- all time aggregations
+create or replace view dm.all_time_agg as
+select
+    round(sum(sec_played) / 86400, 1) days_listened,
+    count(stream_id) total_streams_sessions,
+    count(case when sec_played > 10 then stream_id end) nonskip_sessions,
+    round(sum(percent_played) / 100) total_estimated_streams,
+    count(distinct track_fk) distinct_tracks,
+    count(distinct artist_fk) distinct_artists
+from core.fact_tracks_history fh
+    join core.dim_date dd on fh.date_fk = dd.date_id;
+
 -- albums function
 create or replace function dm.top_albums(filter_year int default null, filter_month int default null, return_limit int default 100)
 returns table(album varchar, artist varchar, hours_played numeric, raw_play_count int, estimated_full_streams int, full_real_streams int, cover_art text)
