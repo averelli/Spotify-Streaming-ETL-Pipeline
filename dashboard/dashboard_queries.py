@@ -32,13 +32,13 @@ def get_aggregated_data(db:DatabaseManager, grain:str):
 
     Args:
         db (DatabaseManager): db instance
-        fiter (str): `year` or `month` 
+        fiter (str): `all_time`, `yearly` or `monthly` 
 
     Returns:
         list: Data from the view
     """
-    if grain not in ["year", "month"]:
+    if grain not in ["yearly", "monthly", "all_time"]:
         raise ValueError(f"Grain value can only be month or year. {grain} passed instead.")
     
-    return db.execute_query(f"SELECT * FROM dm.{grain}ly_agg;")
+    return db.execute_query(f"SELECT * FROM dm.{grain}_agg;")
 
